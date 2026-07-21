@@ -23,3 +23,7 @@ fixelview = "fiberfield.scripts.fixelview:main"
 fiberfield = "fiberfield.scripts.fiberfield:main"
 fixelmatch = "fiberfield.scripts.fixelmatch:main"
 afd2fraction = "fiberfield.scripts.afd2fraction:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"

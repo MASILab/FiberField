@@ -360,35 +360,6 @@ wheels = [
 ]
 
 [[package]]
-name = "diffusion-neural-field"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "cmcrameri" },
-    { name = "dipy" },
-    { name = "fury" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "seaborn" },
-    { name = "torch" },
-    { name = "torchquad" },
-    { name = "wandb" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cmcrameri", specifier = ">=1.9" },
-    { name = "dipy", specifier = ">=1.11.0" },
-    { name = "fury", specifier = ">=0.12.0" },
-    { name = "numpy", specifier = ">=2.3.4" },
-    { name = "pandas", specifier = ">=3.0.3" },
-    { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "torch", specifier = ">=2.9.1" },
-    { name = "torchquad", specifier = ">=0.5.0" },
-    { name = "wandb", specifier = ">=0.23.0" },
-]
-
-[[package]]
 name = "dipy"
 version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -413,6 +384,35 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/23/f5/86190ad667d74b8afc6f92a2c882452bcc944640bbbf05601c9ca76b5833/dipy-1.11.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:13a6156009aa6dc28698c1db046d2dab02417c5a853ee65e09c497d6d738004c", size = 9118186, upload-time = "2025-03-16T19:07:28.788Z" },
     { url = "https://files.pythonhosted.org/packages/5f/7e/2afded4dd8080221bcf28444b5b7c588cc8dfaf6b93a34ea90e402821f27/dipy-1.11.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:843c7f4644b7b69660f8c39ecb250940b4ae1cb8526a42a0ffec377eb4c81bc6", size = 9430957, upload-time = "2025-03-16T19:07:33.742Z" },
     { url = "https://files.pythonhosted.org/packages/45/4f/843e85fb02671538aa2b6bb263a191a406ed653af36bc3818a4f8bd3c728/dipy-1.11.0-cp313-cp313-win_amd64.whl", hash = "sha256:aec7f38a41f69e00af48c5a61515943a89c7ceab2e2cfc1419488bd847d5e847", size = 8563582, upload-time = "2025-03-16T19:07:38.976Z" },
+]
+
+[[package]]
+name = "fiberfield"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "cmcrameri" },
+    { name = "dipy" },
+    { name = "fury" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "seaborn" },
+    { name = "torch" },
+    { name = "torchquad" },
+    { name = "wandb" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cmcrameri", specifier = ">=1.9" },
+    { name = "dipy", specifier = ">=1.11.0" },
+    { name = "fury", specifier = ">=0.12.0" },
+    { name = "numpy", specifier = ">=2.3.4" },
+    { name = "pandas", specifier = ">=3.0.3" },
+    { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "torch", specifier = ">=2.9.1" },
+    { name = "torchquad", specifier = ">=0.5.0" },
+    { name = "wandb", specifier = ">=0.23.0" },
 ]
 
 [[package]]
