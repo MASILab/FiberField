@@ -1,6 +1,6 @@
 import argparse
-from diffusion_neural_field.run.stick import run_stick
-from diffusion_neural_field.run.standard_model import run_sm
+from fiberfield.run.stick import run_stick
+from fiberfield.run.standard_model import run_sm
 
 
 def main():

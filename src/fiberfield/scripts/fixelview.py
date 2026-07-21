@@ -2,7 +2,7 @@ import nibabel as nib
 import numpy as np
 import argparse
 from pathlib import Path
-from diffusion_neural_field.utils import visualize_fixels
+from fiberfield.utils import visualize_fixels
 
 
 def main():

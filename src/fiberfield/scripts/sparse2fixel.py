@@ -2,7 +2,7 @@ import nibabel as nib
 import numpy as np
 import argparse
 from pathlib import Path
-from diffusion_neural_field.utils import sparse_to_fixel_format
+from fiberfield.utils import sparse_to_fixel_format
 
 
 def main():

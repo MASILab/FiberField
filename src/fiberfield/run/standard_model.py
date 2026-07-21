@@ -1,7 +1,8 @@
-from diffusion_neural_field.datasets import DiffusionDataset
-from diffusion_neural_field.models import StickMultiheadModel
-from diffusion_neural_field.signal import StickSignal
-from diffusion_neural_field.utils import plot_stick_slice, sparse_to_fixel_format
+import fiberfield
+from fiberfield.datasets import DiffusionDataset
+from fiberfield.models import DiscreteStandardModelMultihead
+from fiberfield.signal import DiscreteStandardModelSignal
+from fiberfield.utils import plot_discrete_sm_slice, sparse_to_fixel_format
 import wandb
 
 import torch
@@ -11,10 +12,11 @@ import nibabel as nib
 
 import numpy as np
 from tqdm import tqdm, trange
+from datetime import datetime
 from pathlib import Path
 
 
-def run_stick(
+def run_sm(
     input_path,
     bval_path,
     bvec_path,
@@ -34,6 +36,8 @@ def run_stick(
     validation_patience=25,
     min_diffusivity=1e-4,
     min_f_intra=1e-4,
+    include_freewater=True,
+    d_fw=3e-3,
     device=None,
 ):
     config = {
@@ -51,6 +55,9 @@ def run_stick(
         "validation_patience": validation_patience,
         "min_diffusivity": min_diffusivity,
         "min_f_intra": min_f_intra,
+        "include_freewater": include_freewater,
+        "D_fw": d_fw,
+        "voxel_diffusivity": False,
         "device": device or ("cuda" if torch.cuda.is_available() else "cpu"),
     }
     output_dir = Path(output_dir)
@@ -75,7 +82,7 @@ def run_stick(
     valid_dataloader = DataLoader(
         dataset, batch_size=config["batch_size"], shuffle=False, num_workers=4
     )
-    signal_calculator = StickSignal(
+    signal_calculator = DiscreteStandardModelSignal(
         gtab=dataset.gtab,
     )
 
@@ -83,30 +90,44 @@ def run_stick(
     alpha = torch.tensor(config["alpha"])
     sigma = torch.tensor(config["sigma"])
 
-    model = StickMultiheadModel(
+    model = DiscreteStandardModelMultihead(
         max_fibers=config["max_fibers"],
         layer_size=config["layer_size"],
         num_enc=config["num_enc"],
         sigma=config["sigma"],
+        include_freewater=config["include_freewater"],
+        voxel_diffusivity=config["voxel_diffusivity"],
     )
 
     coords, diffusion_signal = next(iter(train_dataloader))
     outputs = model(coords)
     diffusion_signal_reconst_list = []
     for k in range(len(outputs)):
-        D_intra, f_intra, S0, dirs = outputs[k + 1]
+        (
+            D_intra,
+            D_extra_par,
+            D_extra_perp,
+            _,
+            f_intra,
+            f_extra,
+            f_fw,
+            S0,
+            dirs,
+        ) = outputs[k + 1]
 
-        # diffusivity_mask = D_intra >= config["min_diffusivity"]
-        # D_intra = D_intra * diffusivity_mask
-        # f_intra = f_intra * diffusivity_mask
-        # f_intra = f_intra / (f_intra.sum(dim=-1, keepdim=True) + 1e-8)
-
+        D_fw = torch.ones_like(D_intra[..., :1]) * config["D_fw"]
+        D_fw = D_fw.to(D_intra.device)
         diffusion_signal_reconst_list.append(
             signal_calculator.compute_signal(
                 d_intra=D_intra,
+                d_extra_par=D_extra_par,
+                d_extra_perp=D_extra_perp,
                 f_intra=f_intra,
+                f_extra=f_extra,
+                f_fw=f_fw,
                 dirs=dirs,
                 b0=S0.squeeze(-1),
+                d_fw=D_fw,
             )
         )
     diffusion_signal_reconst = torch.stack(diffusion_signal_reconst_list)
@@ -131,11 +152,8 @@ def run_stick(
     #     name=config["name"],
     # )
     model.to(config["device"])
-    tqdm.write(f"Training on device: {config['device']}")
-
-    epoch_pbar = trange(config["num_epochs"], desc="Training", leave=False)
-    for epoch in epoch_pbar:
-        epoch_pbar.set_postfix(loss=f"{loss_value.item():.4f}")
+    print(f"Training on device: {config['device']}")
+    for epoch in trange(config["num_epochs"], desc="Epoch"):
         model.train()
         for batch_num, (coords, diffusion_signal) in enumerate(train_dataloader):
             coords = coords.to(config["device"])
@@ -144,19 +162,31 @@ def run_stick(
             output_list = model(coords)
             diffusion_signal_reconst_list = []
             for k in range(1, len(output_list) + 1):
-                D_intra, f_intra, S0, dirs = output_list[k]
+                (
+                    D_intra,
+                    D_extra_par,
+                    D_extra_perp,
+                    _,
+                    f_intra,
+                    f_extra,
+                    f_fw,
+                    S0,
+                    dirs,
+                ) = output_list[k]
 
-                # diffusivity_mask = D_intra >= config["min_diffusivity"]
-                # D_intra = D_intra * diffusivity_mask
-                # f_intra = f_intra * diffusivity_mask
-                # f_intra = f_intra / (f_intra.sum(dim=-1, keepdim=True) + 1e-8)
-
+                D_fw = torch.ones_like(D_intra[..., :1]) * config["D_fw"]
+                D_fw = D_fw.to(D_intra.device)
                 diffusion_signal_reconst_list.append(
                     signal_calculator.compute_signal(
                         d_intra=D_intra,
+                        d_extra_par=D_extra_par,
+                        d_extra_perp=D_extra_perp,
                         f_intra=f_intra,
+                        f_extra=f_extra,
+                        f_fw=f_fw,
                         dirs=dirs,
                         b0=S0.squeeze(-1),
+                        d_fw=D_fw,
                     )
                 )
 
@@ -188,43 +218,90 @@ def run_stick(
 
             with torch.no_grad():
                 D_intra_all = []
+                D_extra_par_all = []
+                D_extra_perp_all = []
+                D_fw_all = []
                 f_intra_all = []
+                f_extra_all = []
+                f_fw_all = []
                 diffusion_signal_all = []
                 diffusion_signal_reconst_all = []
                 S0_all = []
                 dirs_all = []
-
-                valid_pbar = tqdm(valid_dataloader, desc="Validation", leave=False)
-                for coords, diffusion_signal in valid_pbar:
+                for coords, diffusion_signal in tqdm(
+                    valid_dataloader, desc="Validation", leave=False
+                ):
                     coords = coords.to(config["device"])
                     diffusion_signal = diffusion_signal.to(config["device"])
 
-                    outputs_list = model(coords)
+                    output_list = model(coords)
                     (
                         D_intra_batch_list,
+                        D_extra_par_batch_list,
+                        D_extra_perp_batch_list,
+                        D_fw_batch_list,
                         f_intra_batch_list,
+                        f_extra_batch_list,
+                        f_fw_batch_list,
                         S0_batch_list,
                         dirs_batch_list,
                         diffusion_signal_batch_list,
-                    ) = [], [], [], [], []
-                    for k in range(1, len(outputs_list) + 1):
-                        D_intra_batch, f_intra_batch, S0_batch, dirs_batch = (
-                            outputs_list[k]
-                        )
+                    ) = [], [], [], [], [], [], [], [], [], []
+
+                    for k in range(1, len(output_list) + 1):
+                        (
+                            D_intra_batch,
+                            D_extra_par_batch,
+                            D_extra_perp_batch,
+                            _,
+                            f_intra_batch,
+                            f_extra_batch,
+                            f_fw_batch,
+                            S0_batch,
+                            dirs_batch,
+                        ) = output_list[k]
 
                         # diffusivity_mask = D_intra_batch >= config["min_diffusivity"]
-                        # D_intra_batch = D_intra_batch * diffusivity_mask
-                        # f_intra_batch = f_intra_batch * diffusivity_mask
-                        # f_intra_batch = f_intra_batch / (
-                        #     f_intra_batch.sum(dim=-1, keepdim=True) + 1e-8
-                        # )
+                        # fraction_mask = f_intra_batch >= config["min_f_intra"]
+                        # mask = diffusivity_mask * fraction_mask
+                        # D_intra_batch = D_intra_batch * mask
+                        # D_extra_par_batch = D_extra_par_batch * mask
+                        # D_extra_perp_batch = D_extra_perp_batch * mask
+                        # f_intra_batch = f_intra_batch * mask
+                        # f_extra_batch = f_extra_batch * mask
+
+                        f_all_batch = torch.cat(
+                            [f_intra_batch, f_extra_batch, f_fw_batch], dim=-1
+                        )
+                        f_all_batch = f_all_batch / (
+                            f_all_batch.sum(dim=-1, keepdim=True) + 1e-8
+                        )
+                        f_intra_batch, f_extra_batch, f_fw_batch = torch.split(
+                            f_all_batch,
+                            [
+                                f_intra_batch.shape[-1],
+                                f_extra_batch.shape[-1],
+                                f_fw_batch.shape[-1],
+                            ],
+                            dim=-1,
+                        )
+
+                        D_fw_batch = (
+                            torch.ones_like(D_intra_batch[..., :1]) * config["D_fw"]
+                        )
+                        D_fw_batch = D_fw_batch.to(D_intra_batch.device)
 
                         diffusion_signal_batch_list.append(
                             signal_calculator.compute_signal(
                                 d_intra=D_intra_batch,
+                                d_extra_par=D_extra_par_batch,
+                                d_extra_perp=D_extra_perp_batch,
                                 f_intra=f_intra_batch,
+                                f_extra=f_extra_batch,
+                                f_fw=f_fw_batch,
                                 dirs=dirs_batch,
                                 b0=S0_batch.squeeze(-1),
+                                d_fw=D_fw_batch,
                             )
                         )
 
@@ -232,24 +309,48 @@ def run_stick(
                         D_intra_batch = torch.nn.functional.pad(
                             D_intra_batch, (0, 3 - D_intra_batch.shape[-1])
                         )
+                        D_extra_par_batch = torch.nn.functional.pad(
+                            D_extra_par_batch, (0, 3 - D_extra_par_batch.shape[-1])
+                        )
+                        D_extra_perp_batch = torch.nn.functional.pad(
+                            D_extra_perp_batch, (0, 3 - D_extra_perp_batch.shape[-1])
+                        )
                         f_intra_batch = torch.nn.functional.pad(
                             f_intra_batch, (0, 3 - f_intra_batch.shape[-1])
+                        )
+                        f_extra_batch = torch.nn.functional.pad(
+                            f_extra_batch, (0, 3 - f_extra_batch.shape[-1])
                         )
                         dirs_batch = torch.nn.functional.pad(
                             dirs_batch, (0, 0, 0, 3 - dirs_batch.shape[1])
                         )
                         D_intra_batch_list.append(D_intra_batch)
+                        D_extra_par_batch_list.append(D_extra_par_batch)
+                        D_extra_perp_batch_list.append(D_extra_perp_batch)
+                        D_fw_batch_list.append(D_fw_batch)
                         f_intra_batch_list.append(f_intra_batch)
+                        f_extra_batch_list.append(f_extra_batch)
+                        f_fw_batch_list.append(f_fw_batch)
                         S0_batch_list.append(S0_batch.detach().cpu())
                         dirs_batch_list.append(dirs_batch)
 
                     D_intra_batch = torch.stack(D_intra_batch_list, dim=1)
+                    D_extra_par_batch = torch.stack(D_extra_par_batch_list, dim=1)
+                    D_extra_perp_batch = torch.stack(D_extra_perp_batch_list, dim=1)
+                    D_fw_batch = torch.stack(D_fw_batch_list, dim=1)
                     f_intra_batch = torch.stack(f_intra_batch_list, dim=1)
+                    f_extra_batch = torch.stack(f_extra_batch_list, dim=1)
+                    f_fw_batch = torch.stack(f_fw_batch_list, dim=1)
                     S0_batch = torch.stack(S0_batch_list, dim=1)
                     dirs_batch = torch.stack(dirs_batch_list, dim=1)
 
                     D_intra_all.append(D_intra_batch.detach().cpu())
+                    D_extra_par_all.append(D_extra_par_batch.detach().cpu())
+                    D_extra_perp_all.append(D_extra_perp_batch.detach().cpu())
+                    D_fw_all.append(D_fw_batch.detach().cpu())
                     f_intra_all.append(f_intra_batch.detach().cpu())
+                    f_extra_all.append(f_extra_batch.detach().cpu())
+                    f_fw_all.append(f_fw_batch.detach().cpu())
                     S0_all.append(S0_batch.detach().cpu())
                     dirs_all.append(dirs_batch.detach().cpu())
                     diffusion_signal_all.append(diffusion_signal.detach().cpu())
@@ -258,7 +359,12 @@ def run_stick(
                     )
 
                 D_intra = torch.cat(D_intra_all, dim=0)
+                D_extra_par = torch.cat(D_extra_par_all, dim=0)
+                D_extra_perp = torch.cat(D_extra_perp_all, dim=0)
+                D_fw = torch.cat(D_fw_all, dim=0)
                 f_intra = torch.cat(f_intra_all, dim=0)
+                f_extra = torch.cat(f_extra_all, dim=0)
+                f_fw = torch.cat(f_fw_all, dim=0)
                 S0 = torch.cat(S0_all, dim=0)
                 dirs = torch.cat(dirs_all, dim=0)
                 diffusion_signal = torch.cat(diffusion_signal_all, dim=0)
@@ -284,7 +390,12 @@ def run_stick(
             mse_k = mse_k + alpha * p_k.to(mse_k.device)[:, None]
             best_k = torch.argmin(mse_k, dim=0)
             D_intra = D_intra[torch.arange(D_intra.shape[0]), best_k]
+            D_extra_par = D_extra_par[torch.arange(D_extra_par.shape[0]), best_k]
+            D_extra_perp = D_extra_perp[torch.arange(D_extra_perp.shape[0]), best_k]
+            D_fw = D_fw[torch.arange(D_fw.shape[0]), best_k]
             f_intra = f_intra[torch.arange(f_intra.shape[0]), best_k]
+            f_extra = f_extra[torch.arange(f_extra.shape[0]), best_k]
+            f_fw = f_fw[torch.arange(f_fw.shape[0]), best_k]
             S0 = S0[torch.arange(S0.shape[0]), best_k]
             dirs = dirs[torch.arange(dirs.shape[0]), best_k]
             diffusion_signal_reconst = diffusion_signal_reconst[
@@ -294,18 +405,39 @@ def run_stick(
             # Sort by f_intra in descending order
             sorted_indices = torch.argsort(f_intra, dim=-1, descending=True)
             D_intra = torch.gather(D_intra, dim=-1, index=sorted_indices)
+            D_extra_par = torch.gather(D_extra_par, dim=-1, index=sorted_indices)
+            D_extra_perp = torch.gather(D_extra_perp, dim=-1, index=sorted_indices)
             f_intra = torch.gather(f_intra, dim=-1, index=sorted_indices)
+            f_extra = torch.gather(f_extra, dim=-1, index=sorted_indices)
             dirs = torch.gather(
                 dirs, dim=-2, index=sorted_indices.unsqueeze(-1).expand(-1, -1, 3)
             )
 
             # Reshape
             D_intra_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+            D_extra_par_np = np.zeros(
+                dataset.dmri_data.shape[:3] + (config["max_fibers"],)
+            )
+            D_extra_perp_np = np.zeros(
+                dataset.dmri_data.shape[:3] + (config["max_fibers"],)
+            )
+            D_fw_np = np.zeros(dataset.dmri_data.shape[:3])
             f_intra_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+            f_extra_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+            f_fw_np = np.zeros(dataset.dmri_data.shape[:3])
             S0_np = np.zeros(dataset.dmri_data.shape[:3])
             dirs_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"], 3))
             D_intra_np[dataset.mask_data.astype(bool), :] = (
                 D_intra.detach().cpu().numpy()
+            )
+            D_extra_par_np[dataset.mask_data.astype(bool), :] = (
+                D_extra_par.detach().cpu().numpy()
+            )
+            D_extra_perp_np[dataset.mask_data.astype(bool), :] = (
+                D_extra_perp.detach().cpu().numpy()
+            )
+            D_fw_np[dataset.mask_data.astype(bool)] = (
+                D_fw.detach().cpu().numpy().squeeze(-1)
             )
             dirs_np[dataset.mask_data.astype(bool), :] = (
                 dirs.detach().cpu().numpy().reshape(-1, config["max_fibers"], 3)
@@ -313,14 +445,25 @@ def run_stick(
             f_intra_np[dataset.mask_data.astype(bool), :] = (
                 f_intra.detach().cpu().numpy()
             )
+            f_extra_np[dataset.mask_data.astype(bool), :] = (
+                f_extra.detach().cpu().numpy()
+            )
+            f_fw_np[dataset.mask_data.astype(bool)] = (
+                f_fw.detach().cpu().numpy().squeeze(-1)
+            )
             S0_np[dataset.mask_data.astype(bool)] = (
                 S0.detach().cpu().numpy().squeeze(-1)
             )
-            plot_stick_slice(
+            plot_discrete_sm_slice(
                 save_path=output_dir / f"validation_epoch_{epoch}.png",
                 dirs_save_path=output_dir / f"peaks_validation_epoch_{epoch}.png",
                 D_intra=D_intra_np,
+                D_extra_par=D_extra_par_np,
+                D_extra_perp=D_extra_perp_np,
+                D_fw=D_fw_np,
                 f_intra=f_intra_np,
+                f_extra=f_extra_np,
+                f_fw=f_fw_np,
                 S0=S0_np,
                 dirs=dirs_np,
                 bg_img=dataset.dmri,
@@ -352,7 +495,7 @@ def run_stick(
                 n_since_last_improvement += 1
 
             if n_since_last_improvement >= config["validation_patience"]:
-                tqdm.write("Early stopping triggered.")
+                print("Early stopping triggered.")
                 break
 
         if n_since_last_improvement >= config["validation_patience"]:
@@ -364,40 +507,86 @@ def run_stick(
 
     with torch.no_grad():
         D_intra_all = []
+        D_extra_par_all = []
+        D_extra_perp_all = []
+        D_fw_all = []
         f_intra_all = []
+        f_extra_all = []
+        f_fw_all = []
         diffusion_signal_all = []
         diffusion_signal_reconst_all = []
         S0_all = []
         dirs_all = []
-        for coords, diffusion_signal in valid_pbar:
+        for coords, diffusion_signal in tqdm(
+            valid_dataloader, desc="Inference", leave=False
+        ):
             coords = coords.to(config["device"])
             diffusion_signal = diffusion_signal.to(config["device"])
 
-            outputs_list = model(coords)
+            output_list = model(coords)
             (
                 D_intra_batch_list,
+                D_extra_par_batch_list,
+                D_extra_perp_batch_list,
+                D_fw_batch_list,
                 f_intra_batch_list,
+                f_extra_batch_list,
+                f_fw_batch_list,
                 S0_batch_list,
                 dirs_batch_list,
                 diffusion_signal_batch_list,
-            ) = [], [], [], [], []
-            for k in range(1, len(outputs_list) + 1):
-                D_intra_batch, f_intra_batch, S0_batch, dirs_batch = outputs_list[k]
+            ) = [], [], [], [], [], [], [], [], [], []
+            for k in range(1, len(output_list) + 1):
+                (
+                    D_intra_batch,
+                    D_extra_par_batch,
+                    D_extra_perp_batch,
+                    _,
+                    f_intra_batch,
+                    f_extra_batch,
+                    f_fw_batch,
+                    S0_batch,
+                    dirs_batch,
+                ) = output_list[k]
 
                 diffusivity_mask = D_intra_batch >= config["min_diffusivity"]
-                f_intra_mask = f_intra_batch >= config["min_f_intra"]
-                output_mask = diffusivity_mask * f_intra_mask
+                fraction_mask = f_intra_batch >= config["min_f_intra"]
+                output_mask = diffusivity_mask * fraction_mask
                 D_intra_batch = D_intra_batch * output_mask
+                D_extra_par_batch = D_extra_par_batch * output_mask
+                D_extra_perp_batch = D_extra_perp_batch * output_mask
                 f_intra_batch = f_intra_batch * output_mask
-                f_intra_batch = f_intra_batch / (
-                    f_intra_batch.sum(dim=-1, keepdim=True) + 1e-8
+                f_extra_batch = f_extra_batch * output_mask
+
+                f_all_batch = torch.cat(
+                    [f_intra_batch, f_extra_batch, f_fw_batch], dim=-1
                 )
+                f_all_batch = f_all_batch / (
+                    f_all_batch.sum(dim=-1, keepdim=True) + 1e-8
+                )
+                f_intra_batch, f_extra_batch, f_fw_batch = torch.split(
+                    f_all_batch,
+                    [
+                        f_intra_batch.shape[-1],
+                        f_extra_batch.shape[-1],
+                        f_fw_batch.shape[-1],
+                    ],
+                    dim=-1,
+                )
+
+                D_fw_batch = torch.ones_like(D_intra_batch[..., :1]) * config["D_fw"]
+                D_fw_batch = D_fw_batch.to(D_intra_batch.device)
                 diffusion_signal_batch_list.append(
                     signal_calculator.compute_signal(
                         d_intra=D_intra_batch,
+                        d_extra_par=D_extra_par_batch,
+                        d_extra_perp=D_extra_perp_batch,
                         f_intra=f_intra_batch,
+                        f_extra=f_extra_batch,
+                        f_fw=f_fw_batch,
                         dirs=dirs_batch,
                         b0=S0_batch.squeeze(-1),
+                        d_fw=D_fw_batch,
                     )
                 )
 
@@ -405,24 +594,48 @@ def run_stick(
                 D_intra_batch = torch.nn.functional.pad(
                     D_intra_batch, (0, 3 - D_intra_batch.shape[-1])
                 )
+                D_extra_par_batch = torch.nn.functional.pad(
+                    D_extra_par_batch, (0, 3 - D_extra_par_batch.shape[-1])
+                )
+                D_extra_perp_batch = torch.nn.functional.pad(
+                    D_extra_perp_batch, (0, 3 - D_extra_perp_batch.shape[-1])
+                )
                 f_intra_batch = torch.nn.functional.pad(
                     f_intra_batch, (0, 3 - f_intra_batch.shape[-1])
+                )
+                f_extra_batch = torch.nn.functional.pad(
+                    f_extra_batch, (0, 3 - f_extra_batch.shape[-1])
                 )
                 dirs_batch = torch.nn.functional.pad(
                     dirs_batch, (0, 0, 0, 3 - dirs_batch.shape[1])
                 )
                 D_intra_batch_list.append(D_intra_batch)
+                D_extra_par_batch_list.append(D_extra_par_batch)
+                D_extra_perp_batch_list.append(D_extra_perp_batch)
+                D_fw_batch_list.append(D_fw_batch)
                 f_intra_batch_list.append(f_intra_batch)
+                f_extra_batch_list.append(f_extra_batch)
+                f_fw_batch_list.append(f_fw_batch)
                 S0_batch_list.append(S0_batch.detach().cpu())
                 dirs_batch_list.append(dirs_batch)
 
             D_intra_batch = torch.stack(D_intra_batch_list, dim=1)
+            D_extra_par_batch = torch.stack(D_extra_par_batch_list, dim=1)
+            D_extra_perp_batch = torch.stack(D_extra_perp_batch_list, dim=1)
+            D_fw_batch = torch.stack(D_fw_batch_list, dim=1)
             f_intra_batch = torch.stack(f_intra_batch_list, dim=1)
+            f_extra_batch = torch.stack(f_extra_batch_list, dim=1)
+            f_fw_batch = torch.stack(f_fw_batch_list, dim=1)
             S0_batch = torch.stack(S0_batch_list, dim=1)
             dirs_batch = torch.stack(dirs_batch_list, dim=1)
 
             D_intra_all.append(D_intra_batch.detach().cpu())
+            D_extra_par_all.append(D_extra_par_batch.detach().cpu())
+            D_extra_perp_all.append(D_extra_perp_batch.detach().cpu())
+            D_fw_all.append(D_fw_batch.detach().cpu())
             f_intra_all.append(f_intra_batch.detach().cpu())
+            f_extra_all.append(f_extra_batch.detach().cpu())
+            f_fw_all.append(f_fw_batch.detach().cpu())
             S0_all.append(S0_batch.detach().cpu())
             dirs_all.append(dirs_batch.detach().cpu())
             diffusion_signal_all.append(diffusion_signal.detach().cpu())
@@ -431,7 +644,12 @@ def run_stick(
             )
 
         D_intra = torch.cat(D_intra_all, dim=0)
+        D_extra_par = torch.cat(D_extra_par_all, dim=0)
+        D_extra_perp = torch.cat(D_extra_perp_all, dim=0)
+        D_fw = torch.cat(D_fw_all, dim=0)
         f_intra = torch.cat(f_intra_all, dim=0)
+        f_extra = torch.cat(f_extra_all, dim=0)
+        f_fw = torch.cat(f_fw_all, dim=0)
         S0 = torch.cat(S0_all, dim=0)
         dirs = torch.cat(dirs_all, dim=0)
         diffusion_signal = torch.cat(diffusion_signal_all, dim=0)
@@ -444,43 +662,90 @@ def run_stick(
     mse_k = mse_k + alpha * p_k.to(mse_k.device)[:, None]
     best_k = torch.argmin(mse_k, dim=0)
     D_intra = D_intra[torch.arange(D_intra.shape[0]), best_k]
+    D_extra_par = D_extra_par[torch.arange(D_extra_par.shape[0]), best_k]
+    D_extra_perp = D_extra_perp[torch.arange(D_extra_perp.shape[0]), best_k]
+    D_fw = D_fw[torch.arange(D_fw.shape[0]), best_k]
     f_intra = f_intra[torch.arange(f_intra.shape[0]), best_k]
+    f_extra = f_extra[torch.arange(f_extra.shape[0]), best_k]
+    f_fw = f_fw[torch.arange(f_fw.shape[0]), best_k]
     S0 = S0[torch.arange(S0.shape[0]), best_k]
     dirs = dirs[torch.arange(dirs.shape[0]), best_k]
     diffusion_signal_reconst = diffusion_signal_reconst[
         best_k, torch.arange(diffusion_signal_reconst.shape[1]), :
     ]
 
-    # Sort everything by volume fraction within each voxel
+    # Sort by f_intra in descending order
     sorted_indices = torch.argsort(f_intra, dim=-1, descending=True)
     D_intra = torch.gather(D_intra, dim=-1, index=sorted_indices)
+    D_extra_par = torch.gather(D_extra_par, dim=-1, index=sorted_indices)
+    D_extra_perp = torch.gather(D_extra_perp, dim=-1, index=sorted_indices)
     f_intra = torch.gather(f_intra, dim=-1, index=sorted_indices)
+    f_extra = torch.gather(f_extra, dim=-1, index=sorted_indices)
     dirs = torch.gather(
         dirs, dim=-2, index=sorted_indices.unsqueeze(-1).expand(-1, -1, 3)
     )
 
-    # Save coefficients
+    # Reshape
     D_intra_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+    D_extra_par_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+    D_extra_perp_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+    D_fw_np = np.zeros(dataset.dmri_data.shape[:3])
     f_intra_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+    f_extra_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"],))
+    f_fw_np = np.zeros(dataset.dmri_data.shape[:3])
     S0_np = np.zeros(dataset.dmri_data.shape[:3])
-
+    dirs_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"], 3))
     D_intra_np[dataset.mask_data.astype(bool), :] = D_intra.detach().cpu().numpy()
+    D_extra_par_np[dataset.mask_data.astype(bool), :] = (
+        D_extra_par.detach().cpu().numpy()
+    )
+    D_extra_perp_np[dataset.mask_data.astype(bool), :] = (
+        D_extra_perp.detach().cpu().numpy()
+    )
+    D_fw_np[dataset.mask_data.astype(bool)] = D_fw.detach().cpu().numpy().squeeze(-1)
+    dirs_np[dataset.mask_data.astype(bool), :] = (
+        dirs.detach().cpu().numpy().reshape(-1, config["max_fibers"], 3)
+    )
     f_intra_np[dataset.mask_data.astype(bool), :] = f_intra.detach().cpu().numpy()
+    f_extra_np[dataset.mask_data.astype(bool), :] = f_extra.detach().cpu().numpy()
+    f_fw_np[dataset.mask_data.astype(bool)] = f_fw.detach().cpu().numpy().squeeze(-1)
     S0_np[dataset.mask_data.astype(bool)] = S0.detach().cpu().numpy().squeeze(-1)
 
     D_intra_img = nib.Nifti1Image(
         D_intra_np, affine=dataset.dmri.affine, header=dataset.dmri.header
     )
+    D_extra_par_img = nib.Nifti1Image(
+        D_extra_par_np, affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
+    D_extra_perp_img = nib.Nifti1Image(
+        D_extra_perp_np, affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
+    D_fw_img = nib.Nifti1Image(
+        D_fw_np, affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
     f_intra_img = nib.Nifti1Image(
         f_intra_np, affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
+    f_extra_img = nib.Nifti1Image(
+        f_extra_np, affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
+    f_fw_img = nib.Nifti1Image(
+        f_fw_np, affine=dataset.dmri.affine, header=dataset.dmri.header
     )
     S0_img = nib.Nifti1Image(
         S0_np, affine=dataset.dmri.affine, header=dataset.dmri.header
     )
 
     nib.save(D_intra_img, str(output_dir / "D_intra.nii.gz"))
+    nib.save(D_extra_par_img, str(output_dir / "D_extra_par.nii.gz"))
+    nib.save(D_extra_perp_img, str(output_dir / "D_extra_perp.nii.gz"))
     nib.save(f_intra_img, str(output_dir / "f_intra.nii.gz"))
+    nib.save(f_extra_img, str(output_dir / "f_extra.nii.gz"))
     nib.save(S0_img, str(output_dir / "S0.nii.gz"))
+
+    if config["include_freewater"]:
+        nib.save(f_fw_img, str(output_dir / "f_fw.nii.gz"))
+        nib.save(D_fw_img, str(output_dir / "D_fw.nii.gz"))
 
     dirs_np = np.zeros(dataset.dmri_data.shape[:3] + (config["max_fibers"], 3))
     dirs_np[dataset.mask_data.astype(bool), :] = dirs.detach().cpu().numpy()
@@ -506,7 +771,13 @@ def run_stick(
     # Also save in MRtrix3 fixel format
     index, directions, fixel_data = sparse_to_fixel_format(
         peaks=dirs_np,
-        sparse_data=[D_intra_np, f_intra_np],
+        sparse_data=[
+            D_intra_np,
+            D_extra_par_np,
+            D_extra_perp_np,
+            f_intra_np,
+            f_extra_np,
+        ],
     )
 
     index_nifti = nib.Nifti2Image(
@@ -524,7 +795,22 @@ def run_stick(
     )
     nib.save(D_intra_nifti, str(fixel_dir / "D_intra.nii.gz"))
 
-    f_intra_nifti = nib.Nifti2Image(
+    D_extra_par_nifti = nib.Nifti2Image(
         fixel_data[1], affine=dataset.dmri.affine, header=dataset.dmri.header
     )
+    nib.save(D_extra_par_nifti, str(fixel_dir / "D_extra_par.nii.gz"))
+
+    D_extra_perp_nifti = nib.Nifti2Image(
+        fixel_data[2], affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
+    nib.save(D_extra_perp_nifti, str(fixel_dir / "D_extra_perp.nii.gz"))
+
+    f_intra_nifti = nib.Nifti2Image(
+        fixel_data[3], affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
     nib.save(f_intra_nifti, str(fixel_dir / "f_intra.nii.gz"))
+
+    f_extra_nifti = nib.Nifti2Image(
+        fixel_data[4], affine=dataset.dmri.affine, header=dataset.dmri.header
+    )
+    nib.save(f_extra_nifti, str(fixel_dir / "f_extra.nii.gz"))
