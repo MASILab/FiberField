@@ -228,15 +228,18 @@ def run_stick(
                             )
                         )
 
-                        # Pad everything to length 3
+                        # Pad everything to length config["max_fibers"]
                         D_intra_batch = torch.nn.functional.pad(
-                            D_intra_batch, (0, 3 - D_intra_batch.shape[-1])
+                            D_intra_batch,
+                            (0, config["max_fibers"] - D_intra_batch.shape[-1]),
                         )
                         f_intra_batch = torch.nn.functional.pad(
-                            f_intra_batch, (0, 3 - f_intra_batch.shape[-1])
+                            f_intra_batch,
+                            (0, config["max_fibers"] - f_intra_batch.shape[-1]),
                         )
                         dirs_batch = torch.nn.functional.pad(
-                            dirs_batch, (0, 0, 0, 3 - dirs_batch.shape[1])
+                            dirs_batch,
+                            (0, 0, 0, config["max_fibers"] - dirs_batch.shape[1]),
                         )
                         D_intra_batch_list.append(D_intra_batch)
                         f_intra_batch_list.append(f_intra_batch)
@@ -401,15 +404,15 @@ def run_stick(
                     )
                 )
 
-                # Pad everything to length 3
+                # Pad everything to length config["max_fibers"]
                 D_intra_batch = torch.nn.functional.pad(
-                    D_intra_batch, (0, 3 - D_intra_batch.shape[-1])
+                    D_intra_batch, (0, config["max_fibers"] - D_intra_batch.shape[-1])
                 )
                 f_intra_batch = torch.nn.functional.pad(
-                    f_intra_batch, (0, 3 - f_intra_batch.shape[-1])
+                    f_intra_batch, (0, config["max_fibers"] - f_intra_batch.shape[-1])
                 )
                 dirs_batch = torch.nn.functional.pad(
-                    dirs_batch, (0, 0, 0, 3 - dirs_batch.shape[1])
+                    dirs_batch, (0, 0, 0, config["max_fibers"] - dirs_batch.shape[1])
                 )
                 D_intra_batch_list.append(D_intra_batch)
                 f_intra_batch_list.append(f_intra_batch)
