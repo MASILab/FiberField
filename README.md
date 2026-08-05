@@ -87,4 +87,4 @@ If you use this code in your research, please cite the following paper:
 > [1] Adam M. Saunders, Gaurav Rudravaram, Elyssa M. McMaster, Michael E. Kim, Trent
 Schwartz, Yimeng Dou, Yihao Liu, Lianrui Zuo, Adam W. Anderson, and Bennett A. Landman.
 "Neural fields for adaptive white matter microstructural modeling." Submitted to SPIE 
-Medical Imaging: Image Processing, 2026.
+Medical Imaging: Image Processing, 2027.
