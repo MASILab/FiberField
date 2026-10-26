@@ -1,5 +1,7 @@
 # FiberField
 
+<img width="600" height="600" alt="fixel visualization" src="https://github.com/user-attachments/assets/031890c9-402c-45c4-9e64-1c2a75ffed64" />
+
 A neural field for adaptive white matter fiber modeling from diffusion MRI.
 
 ## Usage
@@ -63,7 +65,7 @@ command.
 
 ## Container
 
-For reproducibility, we also provide a containerized version. You can build the 
+For reproducibility, we also provide a containerized version at [https://doi.org/10.5281/zenodo.23674818](. You can build the 
 container as a Docker image using the provided Dockerfile. Or, you can download the 
 pre-built Apptainer image. The usage is similar to above:
 
@@ -86,5 +88,5 @@ If you use this code in your research, please cite the following paper:
 
 > [1] Adam M. Saunders, Gaurav Rudravaram, Elyssa M. McMaster, Michael E. Kim, Trent
 Schwartz, Yimeng Dou, Yihao Liu, Lianrui Zuo, Adam W. Anderson, and Bennett A. Landman.
-"Neural fields for adaptive white matter microstructural modeling." Submitted to SPIE 
+"Neural fields for adaptive white matter microstructural modeling." Accepted to SPIE 
 Medical Imaging: Image Processing, 2027.
