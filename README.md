@@ -65,7 +65,7 @@ command.
 
 ## Container
 
-For reproducibility, we also provide a containerized version at [https://doi.org/10.5281/zenodo.23674818](. You can build the 
+For reproducibility, we also provide a containerized version at [https://doi.org/10.5281/zenodo.23674818](https://doi.org/10.5281/zenodo.23674818). You can build the 
 container as a Docker image using the provided Dockerfile. Or, you can download the 
 pre-built Apptainer image. The usage is similar to above:
 
