@@ -1,6 +1,7 @@
 import argparse
 from fiberfield.run.stick import run_stick
 from fiberfield.run.standard_model import run_sm
+from fiberfield.run.standard_model_two_stage import run_sm_two_stage
 
 
 def main():
@@ -28,8 +29,8 @@ def main():
         "--model",
         type=str,
         default="stick",
-        choices=["stick", "sm"],
-        help="Fiber model to use, choices are 'stick' or 'sm' for Standard Model (default: stick).",
+        choices=["stick", "sm", "sm_two_stage"],
+        help="Fiber model to use, choices are 'stick', 'sm', or 'sm_two_stage' for Standard Model (default: stick).",
     )
     parser.add_argument(
         "--max_fibers",
@@ -50,7 +51,7 @@ def main():
         help="Number of positional encoding frequencies (default: 5000).",
     )
     parser.add_argument(
-        "--sigma",
+        "--pos_sigma",
         type=float,
         default=4.0,
         help="Standard deviation for positional encoding (default: 4.0).",
@@ -60,6 +61,12 @@ def main():
         type=float,
         default=0.002,
         help="Weight for fiber penalty per number of fibers (default: 0.002).",
+    )
+    parser.add_argument(
+        "--sigma",
+        type=float,
+        default=0.2,
+        help="If model is 'sm_two_stage', this parameter controls the sensitivity to number of fibers (default: 0.2).",
     )
     parser.add_argument(
         "--batch_size",
@@ -146,7 +153,7 @@ def main():
             max_fibers=args.max_fibers,
             layer_size=args.layer_size,
             num_enc=args.num_enc,
-            sigma=args.sigma,
+            sigma=args.pos_sigma,
             alpha=args.alpha,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
@@ -169,8 +176,35 @@ def main():
             max_fibers=args.max_fibers,
             layer_size=args.layer_size,
             num_enc=args.num_enc,
-            sigma=args.sigma,
+            sigma=args.pos_sigma,
             alpha=args.alpha,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            num_epochs=args.num_epochs,
+            plot_slice=args.plot_slice,
+            plot_axis=args.plot_axis,
+            validation_frequency=args.validation_frequency,
+            validation_patience=args.validation_patience,
+            min_diffusivity=args.min_diffusivity,
+            min_f_intra=args.min_f_intra,
+            include_freewater=args.include_freewater,
+            d_fw=args.d_fw,
+            device=args.device,
+        )
+    elif args.model == "sm_two_stage":
+        run_sm_two_stage(
+            input_path=args.input,
+            bval_path=args.bval,
+            bvec_path=args.bvec,
+            mask_path=args.mask,
+            output_dir=args.output_dir,
+            max_fibers=args.max_fibers,
+            layer_size=args.layer_size,
+            num_enc=args.num_enc,
+            pos_sigma=args.pos_sigma,
+            sigma=args.sigma,
+            loss_criteria="BIC",
+            likelihood="gaussian",
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
             num_epochs=args.num_epochs,

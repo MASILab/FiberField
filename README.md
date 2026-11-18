@@ -26,7 +26,7 @@ uv run fiberfield \
     --device cuda:0
 ```
 
-To estimate the full Standard Model parameters, use:
+To estimate the full Standard Model parameters as in [2], use:
 
 ```bash
 uv run fiberfield \
@@ -35,7 +35,7 @@ uv run fiberfield \
     --bvec "dwi.bvec" \
     --mask "mask.nii.gz" \
     --output_dir "fiberfield-sm" \
-    --model sm \
+    --model sm_two_stage \
     --device cuda:0
 ```
 
@@ -84,9 +84,11 @@ will not work. You must use `--save_path` and save the visualization to a file.
 
 ## References
 
-If you use this code in your research, please cite the following paper:
+If you use this code in your research, please see the following papers:
 
 > [1] Adam M. Saunders, Gaurav Rudravaram, Elyssa M. McMaster, Michael E. Kim, Trent
 Schwartz, Yimeng Dou, Yihao Liu, Lianrui Zuo, Adam W. Anderson, and Bennett A. Landman.
 "Neural fields for adaptive white matter microstructural modeling." Accepted to SPIE 
 Medical Imaging: Image Processing, 2027.
+
+> [2] Adam M. Saunders, Gaurav Rudravaram, Elyssa M. McMaster, Michael E. Kim, Trent Schwartz, Yimeng Dou, Lianrui Zuo, Adam W. Anderson, Bennett A. Landman. "FiberField: Adaptive information theory-guided neural fields for white matter microstructure." In preparation.

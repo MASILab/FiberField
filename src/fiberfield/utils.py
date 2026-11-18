@@ -103,7 +103,6 @@ def plot_sm_fw_slice(
 
     odf_actor = actor.odf_slicer(
         sh_coeffs,
-        affine=bg_img.affine,
         sphere=signal_calculator.sphere,
         B_matrix=signal_calculator.B.numpy(),
     )
@@ -137,6 +136,11 @@ def plot_sm_fw_slice(
         window.snapshot(scene, fname=str(odf_save_path), size=(1600, 1600))
     else:
         window.show(scene, size=(1600, 1600), reset_camera=False)
+
+    if D_fw is None:
+        D_fw = np.zeros_like(D_intra)
+    if f_fw is None:
+        f_fw = np.zeros_like(f_intra)
 
     f_extra = 1 - (f_intra + f_fw)
     f_extra[S0 == 0] = 0
@@ -210,11 +214,6 @@ def plot_sm_fw_slice(
         location="bottom",
     )
 
-    if D_fw is None:
-        D_fw = np.zeros_like(D_intra)
-    if f_intra is None:
-        f_fw = np.zeros_like(f_intra)
-
     D_fw_plot = ax[3].imshow(
         np.take(D_fw, plot_slice, axis=axis).T,
         cmap=cmap,
@@ -261,7 +260,7 @@ def plot_sm_fw_slice(
     if save_path is not None:
         plt.tight_layout()
         plt.savefig(save_path)
-        plt.close()
+        plt.close("all")
     else:
         plt.show()
 
@@ -375,7 +374,140 @@ def plot_stick_slice(
     if save_path is not None:
         plt.tight_layout()
         plt.savefig(save_path)
-        plt.close()
+        plt.close("all")
+    else:
+        plt.show()
+
+
+def plot_tensor_slice(
+    save_path,
+    dirs_save_path,
+    D_par,
+    D_perp,
+    f,
+    S0,
+    dirs,
+    bg_img,
+    plot_slice,
+    plot_vol=0,
+    axis=2,
+    cmap="gray",
+    value_range={
+        "D_par": (0, 4e-3),
+        "D_perp": (0, 4e-3),
+        "f": (0, 1.0),
+        "S0": (None, None),
+    },
+):
+    scene = window.Scene()
+    bg_img_slice = bg_img.get_fdata()
+    if len(bg_img_slice.shape) == 4:
+        bg_img_slice = bg_img_slice[..., plot_vol]
+    img_actor = actor.slicer(
+        bg_img_slice,
+        interpolation="nearest",
+    )
+
+    n_fibers = dirs.shape[-1]
+    peaks_actor = actor.peak_slicer(dirs, peaks_values=f * n_fibers, colors=None)
+
+    if axis == 0:
+        extent = (plot_slice, plot_slice, 0, bg_img.shape[1], 0, bg_img.shape[2])
+    elif axis == 1:
+        extent = (0, bg_img.shape[0], plot_slice, plot_slice, 0, bg_img.shape[2])
+    else:
+        extent = (0, bg_img.shape[0], 0, bg_img.shape[1], plot_slice, plot_slice)
+
+    # Push out from actor
+    curr_position = peaks_actor.GetPosition()
+    position = list(curr_position)
+    position[axis] += 1
+    peaks_actor.SetPosition(*position)
+
+    scene.add(img_actor)
+    scene.add(peaks_actor)
+
+    img_actor.display_extent(*extent)
+    peaks_actor.display_extent(*extent)
+
+    scene.reset_camera()
+    scene.zoom(2)
+    if axis == 0:
+        scene.camera().Azimuth(90)
+    elif axis == 1:
+        scene.camera().Elevation(90)
+    if dirs_save_path is not None:
+        window.snapshot(scene, fname=str(dirs_save_path), size=(1600, 1600))
+    else:
+        window.show(scene, size=(1600, 1600), reset_camera=False)
+
+    num_fibers = dirs.shape[3]
+    fig, ax = plt.subplots(num_fibers, 4, figsize=(8, 6), squeeze=False)
+
+    for i in range(num_fibers):
+        D_par_plot = ax[i, 0].imshow(
+            np.take(D_par[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["D_par"][0],
+            vmax=value_range["D_par"][1],
+        )
+        D_perp_plot = ax[i, 1].imshow(
+            np.take(D_perp[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["D_perp"][0],
+            vmax=value_range["D_perp"][1],
+        )
+        f_intra_plot = ax[i, 2].imshow(
+            np.take(f[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["f"][0],
+            vmax=value_range["f"][1],
+        )
+        fig.colorbar(
+            D_par_plot,
+            ax=ax[i, 0],
+            location="bottom",
+            format="%.1e",
+            label="$mm^2/s$",
+        )
+        fig.colorbar(
+            D_perp_plot,
+            ax=ax[i, 1],
+            location="bottom",
+            format="%.1e",
+            label="$mm^2/s$",
+        )
+        fig.colorbar(
+            f_intra_plot,
+            ax=ax[i, 2],
+            location="bottom",
+            format="%.1e",
+            label="$f$",
+        )
+    S0_plot = ax[0, 3].imshow(
+        np.take(S0, plot_slice, axis=axis).T,
+        cmap=cmap,
+        origin="lower",
+        vmin=value_range["S0"][0],
+        vmax=value_range["S0"][1],
+    )
+    fig.colorbar(S0_plot, ax=ax[0, 3], location="bottom")
+
+    ax[0, 0].set_title("D_par")
+    ax[0, 1].set_title("D_perp")
+    ax[0, 2].set_title("f")
+    ax[0, 3].set_title("S0")
+
+    for ax_i in ax.flatten():
+        ax_i.axis("off")
+
+    if save_path is not None:
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close("all")
     else:
         plt.show()
 
@@ -415,15 +547,12 @@ def plot_discrete_sm_slice(
         bg_img_slice = bg_img_slice[..., plot_vol]
     img_actor = actor.slicer(
         bg_img_slice,
-        affine=bg_img.affine,
         interpolation="nearest",
     )
 
     f_total = f_intra + f_extra
     n_fibers = f_intra.shape[-1]
-    peaks_actor = actor.peak_slicer(
-        dirs, peaks_values=f_total * n_fibers, affine=bg_img.affine, colors=None
-    )
+    peaks_actor = actor.peak_slicer(dirs, peaks_values=f_total * n_fibers, colors=None)
 
     if axis == 0:
         extent = (plot_slice, plot_slice, 0, bg_img.shape[1], 0, bg_img.shape[2])
@@ -572,7 +701,314 @@ def plot_discrete_sm_slice(
     if save_path is not None:
         plt.tight_layout()
         plt.savefig(save_path)
-        plt.close()
+        plt.close("all")
+    else:
+        plt.show()
+
+
+def plot_discrete_bingham_parameters(
+    save_path,
+    dirs_save_path,
+    dirs,
+    kappa,
+    beta,
+    bg_img,
+    signal_calculator,
+    plot_slice,
+    plot_vol=0,
+    axis=2,
+    cmap="gray",
+    value_range={"kappa": (0, 5), "beta": (0, 5)},
+):
+    scene = window.Scene()
+    bg_img_slice = bg_img.get_fdata()
+    if len(bg_img_slice.shape) == 4:
+        bg_img_slice = bg_img_slice[..., plot_vol]
+    img_actor = actor.slicer(
+        bg_img_slice,
+        interpolation="nearest",
+    )
+    n_fibers = beta.shape[-1]
+
+    if axis == 0:
+        extent = (plot_slice, plot_slice, 0, bg_img.shape[1], 0, bg_img.shape[2])
+    elif axis == 1:
+        extent = (0, bg_img.shape[0], plot_slice, plot_slice, 0, bg_img.shape[2])
+    else:
+        extent = (0, bg_img.shape[0], 0, bg_img.shape[1], plot_slice, plot_slice)
+
+    peaks_actor = actor.peak_slicer(dirs, colors=None)
+
+    # Push out from actor
+    curr_position = peaks_actor.GetPosition()
+    position = list(curr_position)
+    position[axis] += 1
+    peaks_actor.SetPosition(position)
+
+    scene.add(peaks_actor)
+    peaks_actor.display_extent(*extent)
+
+    scene.add(img_actor)
+    img_actor.display_extent(*extent)
+
+    scene.reset_camera()
+    scene.zoom(2)
+    if axis == 0:
+        scene.camera().Azimuth(90)
+    elif axis == 1:
+        scene.camera().Elevation(90)
+    if dirs_save_path is not None:
+        window.snapshot(scene, fname=str(dirs_save_path), size=(1600, 1600))
+    else:
+        window.show(scene, size=(1600, 1600), reset_camera=False)
+
+    fig, ax = plt.subplots(n_fibers, 2, figsize=(10, 5), squeeze=False)
+    for i in range(n_fibers):
+        kappa_plot = ax[i, 0].imshow(
+            np.take(kappa[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["kappa"][0],
+            vmax=value_range["kappa"][1],
+        )
+        beta_plot = ax[i, 1].imshow(
+            np.take(beta[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["beta"][0],
+            vmax=value_range["beta"][1],
+        )
+        fig.colorbar(
+            kappa_plot,
+            ax=ax[i, 0],
+            location="bottom",
+            label="kappa",
+        )
+        fig.colorbar(
+            beta_plot,
+            ax=ax[i, 1],
+            location="bottom",
+            label="beta",
+        )
+
+    ax[0, 0].set_title("$\\kappa$")
+    ax[0, 1].set_title("$\\beta$")
+
+    for ax_i in ax.flatten():
+        ax_i.axis("off")
+
+    if save_path is not None:
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close("all")
+    else:
+        plt.show()
+
+
+def plot_discrete_sm_fod_slice(
+    save_path,
+    dirs_save_path,
+    D_intra,
+    D_extra_par,
+    D_extra_perp,
+    D_fw,
+    f_intra,
+    f_extra,
+    f_fw,
+    S0,
+    sh_coeffs,
+    bg_img,
+    signal_calculator,
+    plot_slice,
+    plot_vol=0,
+    axis=2,
+    cmap="gray",
+    value_range={
+        "D_intra": (0, 4e-3),
+        "D_extra_par": (0, 4e-3),
+        "D_extra_perp": (0, 1.5e-3),
+        "D_fw": (0, 4e-3),
+        "f_intra": (0, 1.0),
+        "f_extra": (0, 1.0),
+        "f_fw": (0, 1.0),
+        "S0": (None, None),
+    },
+):
+    scene = window.Scene()
+    bg_img_slice = bg_img.get_fdata()
+    if len(bg_img_slice.shape) == 4:
+        bg_img_slice = bg_img_slice[..., plot_vol]
+    img_actor = actor.slicer(
+        bg_img_slice,
+        interpolation="nearest",
+    )
+
+    f_total = f_intra + f_extra
+    n_fibers = f_intra.shape[-1]
+
+    if axis == 0:
+        extent = (plot_slice, plot_slice, 0, bg_img.shape[1], 0, bg_img.shape[2])
+    elif axis == 1:
+        extent = (0, bg_img.shape[0], plot_slice, plot_slice, 0, bg_img.shape[2])
+    else:
+        extent = (0, bg_img.shape[0], 0, bg_img.shape[1], plot_slice, plot_slice)
+
+    colors = [
+        (255, 0, 0),
+        (0, 255, 0),
+        (0, 0, 255),
+        (255, 255, 0),
+        (255, 0, 255),
+        (0, 255, 255),
+    ]
+    for i in range(n_fibers):
+        odf_actor = actor.odf_slicer(
+            sh_coeffs[..., i, :],
+            sphere=signal_calculator.sphere,
+            B_matrix=signal_calculator.B.numpy(),
+            colormap=colors[i % len(colors)],
+        )
+
+        # Push out from actor
+        curr_position = odf_actor.GetPosition()
+        position = list(curr_position)
+        position[axis] += 1
+        odf_actor.SetPosition(position)
+        scene.add(odf_actor)
+        odf_actor.display_extent(*extent)
+
+    scene.add(img_actor)
+    img_actor.display_extent(*extent)
+
+    scene.reset_camera()
+    scene.zoom(2)
+    if axis == 0:
+        scene.camera().Azimuth(90)
+    elif axis == 1:
+        scene.camera().Elevation(90)
+    if dirs_save_path is not None:
+        window.snapshot(scene, fname=str(dirs_save_path), size=(1600, 1600))
+    else:
+        window.show(scene, size=(1600, 1600), reset_camera=False)
+
+    num_fibers = sh_coeffs.shape[3]
+    fig, ax = plt.subplots(num_fibers, 8, figsize=(15, 5), squeeze=False)
+
+    for i in range(num_fibers):
+        D_intra_plot = ax[i, 0].imshow(
+            np.take(D_intra[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["D_intra"][0],
+            vmax=value_range["D_intra"][1],
+        )
+        D_extra_par_plot = ax[i, 1].imshow(
+            np.take(D_extra_par[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["D_extra_par"][0],
+            vmax=value_range["D_extra_par"][1],
+        )
+        D_extra_perp_plot = ax[i, 2].imshow(
+            np.take(D_extra_perp[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["D_extra_perp"][0],
+            vmax=value_range["D_extra_perp"][1],
+        )
+        f_intra_plot = ax[i, 4].imshow(
+            np.take(f_intra[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["f_intra"][0],
+            vmax=value_range["f_intra"][1],
+        )
+        f_extra_plot = ax[i, 5].imshow(
+            np.take(f_extra[:, :, :, i], plot_slice, axis=axis).T,
+            cmap=cmap,
+            origin="lower",
+            vmin=value_range["f_extra"][0],
+            vmax=value_range["f_extra"][1],
+        )
+        fig.colorbar(
+            D_intra_plot,
+            ax=ax[i, 0],
+            location="bottom",
+            format="%.1e",
+            label="$mm^2/s$",
+        )
+        fig.colorbar(
+            D_extra_par_plot,
+            ax=ax[i, 1],
+            location="bottom",
+            format="%.1e",
+            label="$mm^2/s$",
+        )
+        fig.colorbar(
+            D_extra_perp_plot,
+            ax=ax[i, 2],
+            location="bottom",
+            format="%.1e",
+            label="$mm^2/s$",
+        )
+        fig.colorbar(
+            f_intra_plot,
+            ax=ax[i, 4],
+            location="bottom",
+        )
+        fig.colorbar(
+            f_extra_plot,
+            ax=ax[i, 5],
+            location="bottom",
+        )
+
+    D_fw_plot = ax[0, 3].imshow(
+        np.take(D_fw, plot_slice, axis=axis).T,
+        cmap=cmap,
+        origin="lower",
+        vmin=value_range["D_fw"][0],
+        vmax=value_range["D_fw"][1],
+    )
+    f_fw_plot = ax[0, 6].imshow(
+        np.take(f_fw, plot_slice, axis=axis).T,
+        cmap=cmap,
+        origin="lower",
+        vmin=value_range["f_fw"][0],
+        vmax=value_range["f_fw"][1],
+    )
+    S0_plot = ax[0, 7].imshow(
+        np.take(S0, plot_slice, axis=axis).T,
+        cmap=cmap,
+        origin="lower",
+        vmin=value_range["S0"][0],
+        vmax=value_range["S0"][1],
+    )
+    fig.colorbar(f_fw_plot, ax=ax[0, 6], location="bottom")
+    fig.colorbar(S0_plot, ax=ax[0, 7], location="bottom")
+    fig.colorbar(
+        D_fw_plot,
+        ax=ax[0, 3],
+        location="bottom",
+        format="%.1e",
+        label="$mm^2/s$",
+    )
+
+    ax[0, 0].set_title("D_intra")
+    ax[0, 1].set_title("D_extra_par")
+    ax[0, 2].set_title("D_extra_perp")
+    ax[0, 3].set_title("D_fw")
+    ax[0, 4].set_title("f_intra")
+    ax[0, 5].set_title("f_extra")
+    ax[0, 6].set_title("f_fw")
+    ax[0, 7].set_title("S0")
+
+    for ax_i in ax.flatten():
+        ax_i.axis("off")
+
+    if save_path is not None:
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close("all")
     else:
         plt.show()
 
@@ -758,6 +1194,7 @@ def legendre_exp_integral_vectorized(lvals, a):
         main_output[..., mask_l6] = (num_term1 + num_term2) / denom
 
     if mask_l8.any():
+        a8 = a_exp
         num_term1 = (
             -6
             * sqrt_a
@@ -1000,6 +1437,8 @@ def visualize_fixels(
     colorbar=True,
     zoom=1,
     center=None,
+    bg_color=(0, 0, 0),
+    hide_bg=False,
 ):
     """Visualize MRtrix format fixels
 
@@ -1035,6 +1474,10 @@ def visualize_fixels(
         Whether to display a colorbar, by default True
     zoom : float, optional
         Zoom factor for the visualization, by default 1
+    bg_color : tuple, optional
+        Background color for the visualization, by default (0, 0, 0)
+    hide_bg : bool, optional
+        Whether to hide the background image, by default False
     """
     scene = window.Scene()
     bg_img_data = bg_img_nifti.get_fdata()
@@ -1172,27 +1615,33 @@ def visualize_fixels(
     else:
         list_colors = orient2rgb(dirs)
 
-    peaks_actor = actor.line(
-        list_dirs,
-        colors=np.asarray(list_colors),
-        linewidth=linewidth,
-        lod=False,
-    )
+    if len(list_dirs) > 0:
+        peaks_actor = actor.line(
+            list_dirs,
+            colors=np.asarray(list_colors),
+            linewidth=linewidth,
+            lod=False,
+        )
 
-    # Push out from actor
-    curr_position = peaks_actor.GetPosition()
-    position = list(curr_position)
-    position[axis] += 1
-    peaks_actor.SetPosition(*position)
+        # Push out from actor
+        curr_position = peaks_actor.GetPosition()
+        position = list(curr_position)
+        position[axis] += 1
+        peaks_actor.SetPosition(*position)
 
-    scene.add(img_actor)
-    scene.add(peaks_actor)
+        scene.add(peaks_actor)
+
+    if not hide_bg:
+        scene.add(img_actor)
 
     img_actor.display_extent(*extent)
 
     # Change projection
     scene.projection(proj_type="parallel")
     scene.reset_camera()
+
+    # Change background color
+    scene.background(bg_color)
 
     # Get current distance from camera to focal point
     camera = scene.camera()
@@ -1204,17 +1653,19 @@ def visualize_fixels(
     if center is None:
         center = np.mean(centers, axis=0)
 
-    scene.zoom(zoom)
-    if axis == 0:
-        scene.camera().Azimuth(90)
-    elif axis == 1:
-        scene.camera().Elevation(90)
-    if colorbar and colorbar_actor is not None:
-        scene.add(colorbar_actor)
-
     # Set camera center and focal point to the center of the slice
     scene.camera().SetFocalPoint(center)
     scene.camera().SetPosition(center + offset)
+
+    scene.zoom(zoom)
+    if axis == 0:
+        scene.camera().Azimuth(90)
+        scene.camera().Roll(270)
+    elif axis == 1:
+        scene.camera().Elevation(90)
+        scene.camera().Roll(180)
+    if colorbar and colorbar_actor is not None:
+        scene.add(colorbar_actor)
 
     if save_path is not None:
         window.snapshot(scene, fname=str(save_path), size=size)

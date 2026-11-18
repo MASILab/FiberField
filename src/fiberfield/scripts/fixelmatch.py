@@ -45,9 +45,6 @@ def main():
     index_img = nib.load(f"{fixel_dir}/index.nii.gz")
     directions_img = nib.load(f"{fixel_dir}/directions.nii.gz")
 
-    index_img = nib.as_closest_canonical(index_img)
-    directions_img = nib.as_closest_canonical(directions_img)
-
     index = index_img.get_fdata()
     directions = directions_img.get_fdata()
 
@@ -57,7 +54,6 @@ def main():
         if file.name in ["index.nii.gz", "directions.nii.gz"]:
             continue
         metric_img = nib.load(file)
-        metric_img = nib.as_closest_canonical(metric_img)
         metric_data = metric_img.get_fdata()
         # n x p x 1 is fixel data, i x j x k or i x j x k x p is voxel data
         is_voxel_data = (
@@ -77,8 +73,6 @@ def main():
     # Load reference fixel data
     ref_index_img = nib.load(f"{reference_dir}/index.nii.gz")
     ref_directions_img = nib.load(f"{reference_dir}/directions.nii.gz")
-    ref_index_img = nib.as_closest_canonical(ref_index_img)
-    ref_directions_img = nib.as_closest_canonical(ref_directions_img)
     ref_index = ref_index_img.get_fdata()
     ref_directions = ref_directions_img.get_fdata()
 

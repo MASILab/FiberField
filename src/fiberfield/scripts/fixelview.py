@@ -83,8 +83,8 @@ def main():
         nargs=2,
         type=int,
         required=False,
-        default=(600, 400),
-        help="Optional size for window, by default (600, 400).",
+        default=(1200, 800),
+        help="Optional size for window, by default (1200, 800).",
     )
     parser.add_argument(
         "--no-colorbar",
@@ -105,6 +105,19 @@ def main():
         required=False,
         default=1,
         help="Optional zoom level.",
+    )
+    parser.add_argument(
+        "--bg_color",
+        type=int,
+        nargs=3,
+        required=False,
+        default=[0, 0, 0],
+        help="Optional background color for the visualization, specified as RGB values (0-1).",
+    )
+    parser.add_argument(
+        "--hide_bg",
+        action="store_true",
+        help="Optional flag to hide the background image.",
     )
     args = parser.parse_args()
 
@@ -158,6 +171,8 @@ def main():
         colorbar=not args.no_colorbar,
         bg_img_value_range=args.value_range,
         zoom=args.zoom,
+        bg_color=args.bg_color,
+        hide_bg=args.hide_bg,
     )
 
 

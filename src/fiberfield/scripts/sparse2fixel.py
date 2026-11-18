@@ -28,7 +28,7 @@ def main():
     )
     args = parser.parse_args()
 
-    peaks = nib.load(args.peaks)
+    peaks = nib.as_closest_canonical(nib.load(args.peaks))
     data = peaks.get_fdata()
 
     fixel_dir = Path(args.fixel_dir)
@@ -48,7 +48,10 @@ def main():
     sparse_data = None
     sparse_data_names = None
     if args.sparse_data:
-        sparse_data = [nib.load(path).get_fdata() for path in args.sparse_data]
+        sparse_data = [
+            nib.as_closest_canonical(nib.load(path)).get_fdata()
+            for path in args.sparse_data
+        ]
         sparse_data_names = [Path(path).name for path in args.sparse_data]
         for i, d in enumerate(sparse_data):
             if d.ndim not in [4, 5]:
@@ -66,16 +69,16 @@ def main():
 
     index, directions, fixel_data = sparse_to_fixel_format(data, sparse_data, eps=1e-8)
     nib.save(
-        nib.Nifti2Image(index.astype(np.int32), peaks.affine),
+        nib.Nifti2Image(index.astype(np.int32), peaks.affine, peaks.header),
         fixel_dir / "index.nii.gz",
     )
     nib.save(
-        nib.Nifti1Image(directions.astype(np.float32), peaks.affine),
+        nib.Nifti2Image(directions.astype(np.float32), peaks.affine, peaks.header),
         fixel_dir / "directions.nii.gz",
     )
     for i, d in enumerate(fixel_data):
         nib.save(
-            nib.Nifti1Image(d.astype(np.float32), peaks.affine),
+            nib.Nifti2Image(d.astype(np.float32), peaks.affine, peaks.header),
             fixel_dir / f"{sparse_data_names[i]}",
         )
 
